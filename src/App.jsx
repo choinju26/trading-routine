@@ -21,7 +21,7 @@ const RULE_VIOLATIONS = [
   { id: "early_exit", label: "조기 청산 (공포로 인한)" },
 ];
 
-const LEVERAGES = [1, 2, 3, 5, 10, 20, 50, 100];
+
 const EMOTIONS = ["😤 집중", "😊 좋음", "😐 보통", "😟 불안", "😡 흥분"];
 
 const formatDate = (d) => {
@@ -38,7 +38,7 @@ const EMPTY_LOG = () => ({
   checklist: {},
   violations: {},
   asset: "",
-  leverage: "",
+  leverage: "14",
   direction: "",
   pnlType: "profit",
   entry: "",
@@ -162,7 +162,7 @@ export default function App() {
       setLog({
         ...newLog,
         asset: "",
-        leverage: "",
+        leverage: "14",
         direction: "",
         entry: "",
         exit: "",
@@ -399,21 +399,8 @@ export default function App() {
             <div style={s.secTitle}><span>거래 정보</span><div style={s.secLine} /></div>
             <div style={{ marginBottom: 10 }}>
               <div style={s.fieldLbl}>레버리지</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                {LEVERAGES.map((lv) => (
-                  <button key={lv}
-                    style={{ padding: "7px 0", width: 52, borderRadius: 8, fontSize: 12, fontWeight: log.leverage === String(lv) ? 700 : 400, border: `1px solid ${log.leverage === String(lv) ? gold : border}`, background: log.leverage === String(lv) ? `${gold}18` : "transparent", color: log.leverage === String(lv) ? gold : sub, cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s" }}
-                    onClick={() => setField("leverage", String(lv))}>
-                    {lv}x
-                  </button>
-                ))}
-                <input
-                  style={{ ...s.field, width: 64, padding: "7px 10px", fontSize: 12, textAlign: "center" }}
-                  placeholder="직접"
-                  value={LEVERAGES.includes(parseInt(log.leverage)) ? "" : log.leverage}
-                  onChange={(e) => setField("leverage", e.target.value)}
-                  type="number"
-                />
+              <div style={{ display: "inline-block", padding: "8px 20px", borderRadius: 8, border: `1px solid ${gold}`, background: `${gold}18`, color: gold, fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
+                14x
               </div>
             </div>
             <div style={{ marginBottom: 10 }}>
@@ -533,10 +520,7 @@ export default function App() {
               return (
                 <div key={key} style={{ ...s.histCard(p), border: `1.5px solid ${accent}` }}>
                   <div style={{ fontSize: 10, color: accent, marginBottom: 12, letterSpacing: "0.1em" }}>— 수정 중 —</div>
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={s.fieldLbl}>레버리지</div>
-                    <div style={s.btnRow}>{LEVERAGES.map((lv) => <button key={lv} style={{ ...s.pill(editDraft.leverage === String(lv), gold), padding: "5px 10px", fontSize: 10 }} onClick={() => setEditDraft({ ...editDraft, leverage: String(lv) })}>{lv}x</button>)}</div>
-                  </div>
+
                   <div style={{ marginBottom: 8 }}>
                     <div style={s.fieldLbl}>방향</div>
                     <div style={s.btnRow}>{["LONG", "SHORT", "양방향"].map((dir) => <button key={dir} style={{ ...s.pill(editDraft.direction === dir, dir === "SHORT" ? danger : dir === "LONG" ? green : gold), padding: "5px 10px", fontSize: 10 }} onClick={() => setEditDraft({ ...editDraft, direction: dir })}>{dir}</button>)}</div>
