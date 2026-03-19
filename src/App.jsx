@@ -126,8 +126,15 @@ export default function App() {
 
   // 히스토리 편집/삭제
   const [deletingDay, setDeletingDay] = useState(null);
-  const [deletingTrade, setDeletingTrade] = useState(null); // { dayKey, tradeId }
+  const [deletingTrade, setDeletingTrade] = useState(null);
+  const [editingTrade, setEditingTrade] = useState(null); // { dayKey, tradeId }
+  const [editDraft, setEditDraft] = useState(null);
   const [expandedDay, setExpandedDay] = useState(null);
+
+  // 목표금액
+  const [targetCapital, setTargetCapital] = useState("");
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [targetInput, setTargetInput] = useState("");
 
   useEffect(() => {
     try {
@@ -136,6 +143,8 @@ export default function App() {
       if (stored[todayKey]) setTodayLog(stored[todayKey]);
       const cap = localStorage.getItem("startCapital");
       if (cap) setStartCapital(cap);
+      const tgt = localStorage.getItem("targetCapital");
+      if (tgt) setTargetCapital(tgt);
     } catch {}
   }, []);
 
@@ -212,6 +221,40 @@ export default function App() {
     setCapitalInput("");
   };
 
+  const saveTarget = () => {
+    const val = targetInput.replace(/,/g, "");
+    if (!isNaN(val) && val !== "") {
+      setTargetCapital(val);
+      localStorage.setItem("targetCapital", val);
+    }
+    setEditingTarget(false);
+    setTargetInput("");
+  };
+
+  const handleEditTrade = (dayKey, tradeId) => {
+    const dayData = dayKey === todayKey ? todayLog : history[dayKey];
+    const t = dayData.trades.find(t => t.id === tradeId);
+    if (!t) return;
+    setEditDraft({ ...t, pnlType: parseFloat(t.pnl) < 0 ? "loss" : "profit", pnl: String(Math.abs(parseFloat(t.pnl) || 0)) });
+    setEditingTrade({ dayKey, tradeId });
+  };
+
+  const handleSaveEditTrade = () => {
+    if (!editingTrade || !editDraft) return;
+    const { dayKey, tradeId } = editingTrade;
+    const signedPnl = String(Math.abs(parseFloat(editDraft.pnl) || 0) * (editDraft.pnlType === "loss" ? -1 : 1));
+    const updated = { ...editDraft, pnl: signedPnl };
+    const dayData = dayKey === todayKey ? todayLog : history[dayKey];
+    const newTrades = dayData.trades.map(t => t.id === tradeId ? updated : t);
+    const newDay = { ...dayData, trades: newTrades };
+    const newHist = { ...history, [dayKey]: newDay };
+    setHistory(newHist);
+    persist(newHist);
+    if (dayKey === todayKey) setTodayLog(newDay);
+    setEditingTrade(null);
+    setEditDraft(null);
+  };
+
   // 계산
   const cap = parseFloat(startCapital) || 0;
   const checkedCount = CHECKLIST_ITEMS.filter(i => todayLog.checklist[i.id]).length;
@@ -226,7 +269,8 @@ export default function App() {
   const winTrades = allTrades.filter(t => (parseFloat(t.pnl) || 0) > 0).length;
   const winRate = allTrades.length > 0 ? Math.round((winTrades / allTrades.length) * 100) : 0;
   const currentBalance = cap + totalPnl;
-  const totalViolations = allDays.reduce((s, [, d]) => s + Object.values(d.violations || {}).filter(Boolean).length, 0);
+  const tgt = parseFloat(targetCapital) || 0;
+  const targetPct = tgt > 0 && cap > 0 ? Math.min((totalPnl / (tgt - cap)) * 100, 999) : 0;
 
   // 차트 데이터: 날짜별 누적 잔고
   let running = cap;
@@ -279,6 +323,8 @@ export default function App() {
   const tradeCard = (t, dayKey) => {
     const p = parseFloat(t.pnl) || 0;
     const isDeleting = deletingTrade?.dayKey === dayKey && deletingTrade?.tradeId === t.id;
+    const isEditing = editingTrade?.dayKey === dayKey && editingTrade?.tradeId === t.id;
+
     if (isDeleting) return (
       <div key={t.id} style={{ padding: "12px 14px", marginBottom: 6, background: card, border: `1.5px solid ${danger}`, borderRadius: 10 }}>
         <div style={{ fontSize: 12, color: text, marginBottom: 12 }}>이 매매 기록을 삭제할까요?<br /><span style={{ fontSize: 11, color: sub }}>삭제 후 복구할 수 없어요.</span></div>
@@ -288,6 +334,45 @@ export default function App() {
         </div>
       </div>
     );
+
+    if (isEditing && editDraft) {
+      const ep = parseFloat(editDraft.pnl) || 0;
+      return (
+        <div key={t.id} style={{ padding: "14px", marginBottom: 6, background: card, border: `1.5px solid ${accent}`, borderRadius: 10 }}>
+          <div style={{ fontSize: 10, color: accent, letterSpacing: "0.1em", marginBottom: 12 }}>— 수정 중 —</div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={s.fieldLbl}>방향</div>
+            <div style={s.btnRow}>
+              {["LONG", "SHORT"].map(d => (
+                <button key={d} style={s.pill(editDraft.direction === d, d === "SHORT" ? danger : green)} onClick={() => setEditDraft({ ...editDraft, direction: d })}>{d}</button>
+              ))}
+            </div>
+          </div>
+          <div style={s.row}>
+            <div style={s.col}><div style={s.fieldLbl}>진입가</div><input style={s.field} placeholder="0.00" value={editDraft.entry} onChange={e => setEditDraft({ ...editDraft, entry: e.target.value })} type="number" /></div>
+            <div style={s.col}><div style={s.fieldLbl}>청산가</div><input style={s.field} placeholder="0.00" value={editDraft.exit} onChange={e => setEditDraft({ ...editDraft, exit: e.target.value })} type="number" /></div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={s.fieldLbl}>수익 / 손실</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button onClick={() => setEditDraft({ ...editDraft, pnlType: "profit" })} style={{ flex: 1, padding: "9px", borderRadius: 8, border: `1.5px solid ${editDraft.pnlType !== "loss" ? "rgba(6,214,160,0.6)" : border}`, background: editDraft.pnlType !== "loss" ? "rgba(6,214,160,0.1)" : "transparent", color: editDraft.pnlType !== "loss" ? green : sub, fontWeight: 700, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>📈 수익</button>
+              <button onClick={() => setEditDraft({ ...editDraft, pnlType: "loss" })} style={{ flex: 1, padding: "9px", borderRadius: 8, border: `1.5px solid ${editDraft.pnlType === "loss" ? "rgba(255,61,90,0.6)" : border}`, background: editDraft.pnlType === "loss" ? "rgba(255,61,90,0.1)" : "transparent", color: editDraft.pnlType === "loss" ? danger : sub, fontWeight: 700, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>📉 손실</button>
+            </div>
+            <input style={{ ...s.field, color: editDraft.pnlType === "loss" ? danger : green, fontWeight: 700, textAlign: "right" }}
+              placeholder="0.00" value={editDraft.pnl} onChange={e => setEditDraft({ ...editDraft, pnl: e.target.value })} type="number" />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={s.fieldLbl}>메모</div>
+            <textarea style={{ ...s.field, minHeight: 72, resize: "none", lineHeight: 1.5, fontSize: 12 }}
+              value={editDraft.note} onChange={e => setEditDraft({ ...editDraft, note: e.target.value })} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleSaveEditTrade} style={{ flex: 1, padding: "10px", background: accent, color: "#000", border: "none", borderRadius: 8, fontWeight: 700, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>저장</button>
+            <button onClick={() => { setEditingTrade(null); setEditDraft(null); }} style={{ padding: "10px 14px", background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 8, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>취소</button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div key={t.id} style={{ padding: "12px 14px", marginBottom: 6, background: bg, border: `1px solid ${border}`, borderRadius: 10, borderLeft: `3px solid ${p > 0 ? green : p < 0 ? danger : muted}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
@@ -296,7 +381,10 @@ export default function App() {
             {t.direction && <span style={{ fontSize: 11, fontWeight: 700, color: t.direction === "LONG" ? green : danger }}>{t.direction}</span>}
             <span style={{ fontSize: 11, color: gold }}>14x</span>
           </div>
-          <button onClick={() => setDeletingTrade({ dayKey, tradeId: t.id })} style={{ padding: "2px 8px", fontSize: 10, background: "transparent", color: danger, border: `1px solid ${danger}30`, borderRadius: 5, cursor: "pointer", fontFamily: "inherit" }}>삭제</button>
+          <div style={{ display: "flex", gap: 5 }}>
+            <button onClick={() => handleEditTrade(dayKey, t.id)} style={{ padding: "2px 8px", fontSize: 10, background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 5, cursor: "pointer", fontFamily: "inherit" }}>수정</button>
+            <button onClick={() => setDeletingTrade({ dayKey, tradeId: t.id })} style={{ padding: "2px 8px", fontSize: 10, background: "transparent", color: danger, border: `1px solid ${danger}30`, borderRadius: 5, cursor: "pointer", fontFamily: "inherit" }}>삭제</button>
+          </div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
           <div>
@@ -532,10 +620,38 @@ export default function App() {
 
           {/* 통계 */}
           <div style={s.statRow}>
-            <div style={s.statCard}><div style={s.statVal(winRate >= 50 ? green : danger)}>{winRate}%</div><div style={s.statLbl}>승률</div></div>
-            <div style={s.statCard}><div style={s.statVal()}>{allTrades.length}</div><div style={s.statLbl}>총 매매</div></div>
-            <div style={s.statCard}><div style={s.statVal(totalViolations === 0 ? green : danger)}>{totalViolations}</div><div style={s.statLbl}>총 위반</div></div>
+            <div style={s.statCard}><div style={s.statVal(green)}>{winTrades}승</div><div style={s.statLbl}>수익</div></div>
+            <div style={s.statCard}><div style={s.statVal(danger)}>{allTrades.length - winTrades}패</div><div style={s.statLbl}>손해</div></div>
+            <div style={{ ...s.statCard, cursor: "pointer", position: "relative", overflow: "hidden" }} onClick={() => { setEditingTarget(true); setTargetInput(targetCapital); }}>
+              {tgt > 0 && (
+                <div style={{ position: "absolute", bottom: 0, left: 0, height: 3, width: `${Math.min(targetPct, 100)}%`, background: targetPct >= 100 ? green : accent, transition: "width 0.5s ease" }} />
+              )}
+              <div style={s.statVal(targetPct >= 100 ? green : targetPct > 0 ? accent : sub)}>
+                {tgt > 0 ? `${targetPct.toFixed(1)}%` : "—"}
+              </div>
+              <div style={s.statLbl}>목표달성</div>
+              {!tgt && <div style={{ fontSize: 9, color: accent, marginTop: 2 }}>탭하여 설정</div>}
+            </div>
           </div>
+
+          {/* 목표금액 설정 모달 */}
+          {editingTarget && (
+            <div style={{ background: card, border: `1px solid ${accent}40`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
+              <div style={{ fontSize: 10, color: accent, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 10 }}>목표금액 설정</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input style={{ ...s.field, flex: 1, fontSize: 15, fontWeight: 700 }} placeholder="목표 금액 (USDT)" value={targetInput}
+                  onChange={e => setTargetInput(e.target.value)} type="number" autoFocus />
+                <button onClick={saveTarget} style={{ padding: "11px 16px", background: accent, color: "#000", border: "none", borderRadius: 8, fontWeight: 700, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>저장</button>
+                <button onClick={() => setEditingTarget(false)} style={{ padding: "11px 12px", background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 8, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>취소</button>
+              </div>
+              {tgt > 0 && cap > 0 && (
+                <div style={{ fontSize: 11, color: sub, marginTop: 10 }}>
+                  현재 {currentBalance.toLocaleString()} / 목표 {tgt.toLocaleString()} USDT
+                  <span style={{ color: accent, marginLeft: 8 }}>({(tgt - currentBalance).toLocaleString()} 남음)</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 날짜별 기록 */}
           <div style={s.secTitle}><span>날짜별 기록</span><div style={s.secLine} /></div>
