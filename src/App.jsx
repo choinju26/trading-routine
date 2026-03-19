@@ -21,7 +21,7 @@ const RULE_VIOLATIONS = [
   { id: "early_exit", label: "조기 청산 (공포로 인한)" },
 ];
 
-const ASSETS = ["선물", "옵션", "BTC", "ETH", "기타"];
+const LEVERAGES = [1, 2, 3, 5, 10, 20, 50, 100];
 const EMOTIONS = ["😤 집중", "😊 좋음", "😐 보통", "😟 불안", "😡 흥분"];
 
 const formatDate = (d) => {
@@ -38,7 +38,9 @@ const EMPTY_LOG = () => ({
   checklist: {},
   violations: {},
   asset: "",
+  leverage: "",
   direction: "",
+  pnlType: "profit",
   entry: "",
   exit: "",
   pnl: "",
@@ -150,7 +152,8 @@ export default function App() {
   };
 
   const handleSave = () => {
-    const newLog = { ...log, saved: true };
+    const signedPnl = String(Math.abs(parseFloat(log.pnl) || 0) * (log.pnlType === "loss" ? -1 : 1));
+    const newLog = { ...log, pnl: signedPnl, saved: true };
     updateHistory(newLog);
     setSaveAnim(true);
     setTimeout(() => {
@@ -159,10 +162,12 @@ export default function App() {
       setLog({
         ...newLog,
         asset: "",
+        leverage: "",
         direction: "",
         entry: "",
         exit: "",
         pnl: "",
+        pnlType: "profit",
         emotion: "",
         note: "",
       });
@@ -203,8 +208,8 @@ export default function App() {
   const checkedCount = CHECKLIST_ITEMS.filter((i) => log.checklist[i.id]).length;
   const checkPct = Math.round((checkedCount / CHECKLIST_ITEMS.length) * 100);
   const violationCount = RULE_VIOLATIONS.filter((i) => log.violations[i.id]).length;
-  const pnlNum = parseFloat(log.pnl) || 0;
-  const historyDays = Object.entries(history).filter(([k]) => k !== todayKey).sort(([a], [b]) => (a < b ? 1 : -1)).slice(0, 30);
+  const pnlNum = (parseFloat(log.pnl) || 0) * (log.pnlType === "loss" ? -1 : 1);
+  const historyDays = Object.entries(history).sort(([a], [b]) => (a < b ? 1 : -1)).slice(0, 30);
 
   const cap = parseFloat(startCapital) || 0;
   const sortedAll = Object.entries(history).filter(([, d]) => d.pnl !== "").sort(([a], [b]) => (a < b ? -1 : 1));
@@ -393,13 +398,28 @@ export default function App() {
           <div style={s.section}>
             <div style={s.secTitle}><span>거래 정보</span><div style={s.secLine} /></div>
             <div style={{ marginBottom: 10 }}>
-              <div style={s.fieldLbl}>자산</div>
-              <div style={s.btnRow}>{ASSETS.map((a) => <button key={a} style={s.pill(log.asset === a)} onClick={() => setField("asset", a)}>{a}</button>)}</div>
+              <div style={s.fieldLbl}>레버리지</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                {LEVERAGES.map((lv) => (
+                  <button key={lv}
+                    style={{ padding: "7px 0", width: 52, borderRadius: 8, fontSize: 12, fontWeight: log.leverage === String(lv) ? 700 : 400, border: `1px solid ${log.leverage === String(lv) ? gold : border}`, background: log.leverage === String(lv) ? `${gold}18` : "transparent", color: log.leverage === String(lv) ? gold : sub, cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s" }}
+                    onClick={() => setField("leverage", String(lv))}>
+                    {lv}x
+                  </button>
+                ))}
+                <input
+                  style={{ ...s.field, width: 64, padding: "7px 10px", fontSize: 12, textAlign: "center" }}
+                  placeholder="직접"
+                  value={LEVERAGES.includes(parseInt(log.leverage)) ? "" : log.leverage}
+                  onChange={(e) => setField("leverage", e.target.value)}
+                  type="number"
+                />
+              </div>
             </div>
             <div style={{ marginBottom: 10 }}>
               <div style={s.fieldLbl}>방향</div>
-              <div style={s.btnRow}>{["LONG", "SHORT", "양방향"].map((d) => (
-                <button key={d} style={s.pill(log.direction === d, d === "SHORT" ? danger : d === "LONG" ? green : gold)} onClick={() => setField("direction", d)}>{d}</button>
+              <div style={s.btnRow}>{["LONG", "SHORT"].map((d) => (
+                <button key={d} style={s.pill(log.direction === d, d === "SHORT" ? danger : green)} onClick={() => setField("direction", d)}>{d}</button>
               ))}</div>
             </div>
             <div style={s.row}>
@@ -407,8 +427,26 @@ export default function App() {
               <div style={s.col}><div style={s.fieldLbl}>청산가</div><input style={s.field} placeholder="0.00" value={log.exit} onChange={(e) => setField("exit", e.target.value)} type="number" /></div>
             </div>
             <div style={{ marginBottom: 10 }}>
-              <div style={s.fieldLbl}>수익/손실 (USDT)</div>
-              <input style={s.pnlInput} placeholder="0" value={log.pnl} onChange={(e) => setField("pnl", e.target.value)} type="number" />
+              <div style={s.fieldLbl}>수익 / 손실</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <button
+                  onClick={() => setField("pnlType", "profit")}
+                  style={{ flex: 1, padding: "10px", borderRadius: 8, border: `1.5px solid ${log.pnlType !== "loss" ? "rgba(6,214,160,0.6)" : border}`, background: log.pnlType !== "loss" ? "rgba(6,214,160,0.1)" : "transparent", color: log.pnlType !== "loss" ? green : sub, fontWeight: 700, fontFamily: "inherit", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
+                  📈 수익
+                </button>
+                <button
+                  onClick={() => setField("pnlType", "loss")}
+                  style={{ flex: 1, padding: "10px", borderRadius: 8, border: `1.5px solid ${log.pnlType === "loss" ? "rgba(255,61,90,0.6)" : border}`, background: log.pnlType === "loss" ? "rgba(255,61,90,0.1)" : "transparent", color: log.pnlType === "loss" ? danger : sub, fontWeight: 700, fontFamily: "inherit", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
+                  📉 손실
+                </button>
+              </div>
+              <input
+                style={{ ...s.pnlInput, borderColor: log.pnlType === "loss" ? "rgba(255,61,90,0.4)" : "rgba(6,214,160,0.4)", color: log.pnlType === "loss" ? danger : green }}
+                placeholder="0.00 USDT"
+                value={log.pnl}
+                onChange={(e) => setField("pnl", e.target.value)}
+                type="number"
+              />
             </div>
           </div>
           <div style={s.section}>
@@ -481,29 +519,7 @@ export default function App() {
 
           <div style={s.secTitle}><span>최근 기록</span><div style={s.secLine} /></div>
 
-          {(log.pnl !== "" || log.note !== "") && (
-            <div style={s.histCard(pnlNum)}>
-              <div style={s.histDate}>오늘 · {log.asset || "—"} {log.direction || ""}</div>
-              <div style={s.histRow}>
-                <div>
-                  <div style={s.histPnl(pnlNum)}>{pnlNum >= 0 ? "+" : ""}{pnlNum.toLocaleString()} USDT</div>
-                  {cap > 0 && log.pnl !== "" && (() => {
-                    const todayPrev = balanceMap[todayKey]?.prev ?? currentBalance - pnlNum;
-                    const todayRor = todayPrev > 0 ? (pnlNum / todayPrev * 100) : null;
-                    return todayRor !== null ? (
-                      <div style={{ fontSize: 11, color: pnlNum >= 0 ? green : danger, marginTop: 2 }}>
-                        수익률 {pnlNum >= 0 ? "+" : ""}{todayRor.toFixed(2)}%
-                      </div>
-                    ) : null;
-                  })()}
-                </div>
-                <div style={s.histMeta}>체크 {checkedCount}/{CHECKLIST_ITEMS.length}<br />위반 {violationCount}건</div>
-              </div>
-              {log.note && <div style={s.histNote}>{log.note.slice(0, 80)}{log.note.length > 80 ? "..." : ""}</div>}
-            </div>
-          )}
-
-          {historyDays.length === 0 && !log.pnl ? (
+          {historyDays.length === 0 ? (
             <div style={s.emptyHist}>아직 기록이 없습니다<br /><br />매매 후 일지를 작성해보세요</div>
           ) : historyDays.map(([key, d]) => {
             const p = parseFloat(d.pnl) || 0;
@@ -518,8 +534,8 @@ export default function App() {
                 <div key={key} style={{ ...s.histCard(p), border: `1.5px solid ${accent}` }}>
                   <div style={{ fontSize: 10, color: accent, marginBottom: 12, letterSpacing: "0.1em" }}>— 수정 중 —</div>
                   <div style={{ marginBottom: 8 }}>
-                    <div style={s.fieldLbl}>자산</div>
-                    <div style={s.btnRow}>{ASSETS.map((a) => <button key={a} style={{ ...s.pill(editDraft.asset === a), padding: "5px 10px", fontSize: 10 }} onClick={() => setEditDraft({ ...editDraft, asset: a })}>{a}</button>)}</div>
+                    <div style={s.fieldLbl}>레버리지</div>
+                    <div style={s.btnRow}>{LEVERAGES.map((lv) => <button key={lv} style={{ ...s.pill(editDraft.leverage === String(lv), gold), padding: "5px 10px", fontSize: 10 }} onClick={() => setEditDraft({ ...editDraft, leverage: String(lv) })}>{lv}x</button>)}</div>
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     <div style={s.fieldLbl}>방향</div>
@@ -562,7 +578,7 @@ export default function App() {
             return (
               <div key={key} style={s.histCard(p)}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <div style={s.histDate}>{key.replace(/-/g, ".")} · {d.asset || "—"} {d.direction || ""}</div>
+                  <div style={s.histDate}>{key === todayKey ? "오늘" : key.replace(/-/g, ".")} · {d.asset || "—"} {d.direction || ""}</div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button onClick={() => handleEditEntry(key)} style={{ padding: "3px 10px", fontSize: 10, background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>수정</button>
                     <button onClick={() => setDeleteConfirm(key)} style={{ padding: "3px 10px", fontSize: 10, background: "transparent", color: danger, border: `1px solid ${danger}30`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>삭제</button>
