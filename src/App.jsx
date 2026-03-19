@@ -130,10 +130,14 @@ export default function App() {
     } catch {}
   }, []);
 
-  const updateHistory = (newLog) => {
-    const updated = { ...history, [todayKey]: newLog };
+  const saveToStorage = (hist) => {
+    try { localStorage.setItem("tradeHistory", JSON.stringify(hist)); } catch {}
+  };
+
+  const updateHistory = (newLog, hist = history) => {
+    const updated = { ...hist, [todayKey]: newLog };
     setHistory(updated);
-    try { localStorage.setItem("tradeHistory", JSON.stringify(updated)); } catch {}
+    saveToStorage(updated);
   };
 
   const toggleCheck = (id) => {
@@ -146,9 +150,17 @@ export default function App() {
     setLog(newLog); updateHistory(newLog);
   };
 
+  // setField는 log 상태만 변경 (탭 전환 시 초기화 방지)
   const setField = (key, val) => {
-    const newLog = { ...log, [key]: val };
-    setLog(newLog); updateHistory(newLog);
+    setLog((prev) => ({ ...prev, [key]: val }));
+  };
+
+  // 탭 변경 시 현재 log를 localStorage에 임시 저장
+  const handleTabChange = (newTab) => {
+    if (log.pnl !== "" || log.note !== "" || log.asset !== "" || log.direction !== "") {
+      updateHistory(log);
+    }
+    setTab(newTab);
   };
 
   const handleSave = () => {
@@ -293,7 +305,7 @@ export default function App() {
         <div style={s.progressBar}><div style={s.progressFill} /></div>
         <div style={s.tabs}>
           {[["check", "체크리스트"], ["journal", "매매일지"], ["history", "히스토리"]].map(([k, l]) => (
-            <button key={k} style={s.tab(tab === k)} onClick={() => setTab(k)}>{l}</button>
+            <button key={k} style={s.tab(tab === k)} onClick={() => handleTabChange(k)}>{l}</button>
           ))}
         </div>
       </div>
@@ -588,7 +600,7 @@ export default function App() {
 
       <nav style={s.navBar}>
         {[["check", "☑", "루틴"], ["journal", "✎", "일지"], ["history", "◈", "기록"]].map(([k, icon, label]) => (
-          <button key={k} style={s.navBtn(tab === k)} onClick={() => setTab(k)}>
+          <button key={k} style={s.navBtn(tab === k)} onClick={() => handleTabChange(k)}>
             <span style={{ fontSize: 20 }}>{icon}</span>
             <span>{label}</span>
           </button>
