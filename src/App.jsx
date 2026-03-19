@@ -155,8 +155,17 @@ export default function App() {
     setSaveAnim(true);
     setTimeout(() => {
       setSaveAnim(false);
-      // 저장 후 일지 필드만 초기화 (체크리스트는 유지)
-      setLog({ ...EMPTY_LOG(), checklist: newLog.checklist, violations: newLog.violations, saved: true });
+      // 저장 후 텍스트 입력칸만 초기화 (저장된 데이터는 유지, 체크리스트도 유지)
+      setLog({
+        ...newLog,
+        asset: "",
+        direction: "",
+        entry: "",
+        exit: "",
+        pnl: "",
+        emotion: "",
+        note: "",
+      });
     }, 1200);
   };
 
