@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 
 const CHECKLIST_ITEMS = [
-  { id: "market", label: "시장 전반 상황 확인 (지수, 변동성)" },
-  { id: "bias", label: "오늘의 방향성(Bias) 설정 완료" },
-  { id: "levels", label: "핵심 지지/저항 레벨 표시 완료" },
-  { id: "news", label: "주요 경제 지표/뉴스 확인" },
-  { id: "size", label: "오늘의 포지션 사이즈 결정" },
-  { id: "loss", label: "최대 손실 한도 설정 (일간)" },
-  { id: "plan", label: "진입 시나리오 A/B 플랜 수립" },
-  { id: "emotion", label: "심리 상태 안정적 (분노/흥분 없음)" },
+  { id: "mss5", label: "5분봉 MSS 발생" },
+  { id: "mss15", label: "15분봉 MSS 발생" },
+  { id: "div1h", label: "1시간봉 다이버전스 생성" },
+  { id: "sweep4h", label: "4시간봉 유동성 스윕" },
+  { id: "liqsweep", label: "Liquidity Sweep" },
+  { id: "div", label: "다이버전스 생성" },
+  { id: "ob", label: "OB 터치" },
+  { id: "fvg", label: "FVG 터치" },
+  { id: "srflip", label: "SR Flip - FRVP" },
 ];
 
 const RULE_VIOLATIONS = [
@@ -113,6 +114,9 @@ export default function App() {
   const [startCapital, setStartCapital] = useState("");
   const [editingCapital, setEditingCapital] = useState(false);
   const [capitalInput, setCapitalInput] = useState("");
+  const [editingKey, setEditingKey] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   useEffect(() => {
     try {
@@ -156,6 +160,27 @@ export default function App() {
     }, 1200);
   };
 
+  const handleDeleteEntry = (key) => {
+    const updated = { ...history };
+    delete updated[key];
+    setHistory(updated);
+    setDeleteConfirm(null);
+    try { localStorage.setItem("tradeHistory", JSON.stringify(updated)); } catch {}
+  };
+
+  const handleEditEntry = (key) => {
+    setEditDraft({ ...history[key] });
+    setEditingKey(key);
+  };
+
+  const handleSaveEdit = () => {
+    const updated = { ...history, [editingKey]: { ...editDraft, saved: true } };
+    setHistory(updated);
+    setEditingKey(null);
+    setEditDraft(null);
+    try { localStorage.setItem("tradeHistory", JSON.stringify(updated)); } catch {}
+  };
+
   const saveCapital = () => {
     const val = capitalInput.replace(/,/g, "");
     if (!isNaN(val) && val !== "") {
@@ -173,9 +198,15 @@ export default function App() {
   const historyDays = Object.entries(history).filter(([k]) => k !== todayKey).sort(([a], [b]) => (a < b ? 1 : -1)).slice(0, 30);
 
   const cap = parseFloat(startCapital) || 0;
-  const sortedAll = Object.entries(history).filter(([, d]) => d.saved && d.pnl !== "").sort(([a], [b]) => (a < b ? -1 : 1));
+  const sortedAll = Object.entries(history).filter(([, d]) => d.pnl !== "").sort(([a], [b]) => (a < b ? -1 : 1));
   let running = cap;
-  const chartData = sortedAll.map(([key, d]) => { running += parseFloat(d.pnl) || 0; return { key, balance: running }; });
+  const balanceMap = {};
+  sortedAll.forEach(([key, d]) => {
+    const prev = running;
+    running += parseFloat(d.pnl) || 0;
+    balanceMap[key] = { prev, balance: running };
+  });
+  const chartData = sortedAll.filter(([, d]) => d.saved).map(([key]) => ({ key, balance: balanceMap[key]?.balance || cap }));
 
   const allDays = Object.values(history);
   const totalPnl = allDays.reduce((s, d) => s + (parseFloat(d.pnl) || 0), 0);
@@ -186,7 +217,7 @@ export default function App() {
   const totalViolations = allDays.reduce((s, d) => s + Object.values(d.violations || {}).filter(Boolean).length, 0);
 
   const accent = "#00E5FF", danger = "#FF3D5A", gold = "#FFD166", green = "#06D6A0";
-  const bg = "#0A0C0F", card = "#111418", border = "#1E2329", muted = "#4B5563", text = "#E8ECF0", sub = "#8B95A1";
+  const bg = "#0A0C0F", card = "#13171C", border = "#2A323D", muted = "#7A8899", text = "#F1F5F9", sub = "#B0BBC8";
 
   const s = {
     app: { minHeight: "100vh", background: bg, color: text, fontFamily: "'IBM Plex Mono','Courier New',monospace", maxWidth: 480, margin: "0 auto", paddingBottom: 80 },
@@ -195,22 +226,22 @@ export default function App() {
     title: { fontSize: 11, letterSpacing: "0.2em", color: accent, textTransform: "uppercase", marginBottom: 2 },
     date: { fontSize: 18, fontWeight: 700, color: text, letterSpacing: "-0.02em" },
     scoreNum: { fontSize: 28, fontWeight: 700, color: checkPct === 100 ? green : checkPct >= 75 ? gold : accent, lineHeight: 1 },
-    scoreLabel: { fontSize: 9, color: sub, letterSpacing: "0.15em", textTransform: "uppercase" },
+    scoreLabel: { fontSize: 10, color: sub, letterSpacing: "0.12em", textTransform: "uppercase" },
     progressBar: { height: 3, background: border, margin: "12px 0 0", overflow: "hidden" },
     progressFill: { height: "100%", width: `${checkPct}%`, background: checkPct === 100 ? green : accent, transition: "width 0.4s ease" },
     tabs: { display: "flex", borderBottom: `1px solid ${border}`, background: card },
-    tab: (a) => ({ flex: 1, padding: "14px 8px", fontSize: 10, letterSpacing: "0.15em", textTransform: "uppercase", border: "none", background: "none", cursor: "pointer", color: a ? accent : muted, borderBottom: a ? `2px solid ${accent}` : "2px solid transparent", transition: "all 0.2s", fontFamily: "inherit" }),
+    tab: (a) => ({ flex: 1, padding: "14px 8px", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", border: "none", background: "none", cursor: "pointer", color: a ? accent : muted, borderBottom: a ? `2px solid ${accent}` : "2px solid transparent", transition: "all 0.2s", fontFamily: "inherit" }),
     content: { padding: "16px 16px 0" },
     section: { marginBottom: 20 },
-    secTitle: { fontSize: 9, letterSpacing: "0.2em", color: accent, textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 },
+    secTitle: { fontSize: 10, letterSpacing: "0.18em", color: accent, textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 },
     secLine: { flex: 1, height: 1, background: border },
     checkItem: (c) => ({ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", marginBottom: 4, background: c ? "rgba(0,229,255,0.04)" : card, border: `1px solid ${c ? "rgba(0,229,255,0.2)" : border}`, borderRadius: 8, cursor: "pointer", transition: "all 0.2s" }),
     checkbox: (c) => ({ width: 18, height: 18, border: `1.5px solid ${c ? accent : muted}`, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c ? accent : "transparent", transition: "all 0.2s" }),
-    chkLabel: (c) => ({ fontSize: 12, color: c ? text : sub, lineHeight: 1.4 }),
+    chkLabel: (c) => ({ fontSize: 13, color: c ? text : sub, lineHeight: 1.5, fontWeight: c ? 500 : 400 }),
     vioItem: (c) => ({ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", marginBottom: 4, background: c ? "rgba(255,61,90,0.07)" : card, border: `1px solid ${c ? "rgba(255,61,90,0.35)" : border}`, borderRadius: 8, cursor: "pointer", transition: "all 0.2s" }),
     vBox: (c) => ({ width: 18, height: 18, border: `1.5px solid ${c ? danger : muted}`, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c ? danger : "transparent", transition: "all 0.2s" }),
-    field: { width: "100%", background: card, border: `1px solid ${border}`, borderRadius: 8, padding: "11px 14px", color: text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
-    fieldLbl: { fontSize: 9, color: sub, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 },
+    field: { width: "100%", background: card, border: `1px solid ${border}`, borderRadius: 8, padding: "11px 14px", color: text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", caretColor: accent },
+    fieldLbl: { fontSize: 10, color: sub, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 7, fontWeight: 600 },
     row: { display: "flex", gap: 10, marginBottom: 10 },
     col: { flex: 1 },
     btnRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 },
@@ -227,9 +258,9 @@ export default function App() {
     statRow: { display: "flex", gap: 8, marginBottom: 12 },
     statCard: { flex: 1, background: card, border: `1px solid ${border}`, borderRadius: 10, padding: "14px 12px", textAlign: "center" },
     statVal: (c) => ({ fontSize: 18, fontWeight: 700, color: c || text }),
-    statLbl: { fontSize: 9, color: sub, letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 3 },
+    statLbl: { fontSize: 10, color: sub, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 4 },
     navBar: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: card, borderTop: `1px solid ${border}`, display: "flex" },
-    navBtn: (a) => ({ flex: 1, padding: "14px 8px 18px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, border: "none", background: "none", cursor: "pointer", color: a ? accent : muted, fontFamily: "inherit", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", transition: "color 0.2s" }),
+    navBtn: (a) => ({ flex: 1, padding: "14px 8px 18px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, border: "none", background: "none", cursor: "pointer", color: a ? accent : muted, fontFamily: "inherit", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", transition: "color 0.2s" }),
   };
 
   return (
@@ -447,11 +478,15 @@ export default function App() {
               <div style={s.histRow}>
                 <div>
                   <div style={s.histPnl(pnlNum)}>{pnlNum >= 0 ? "+" : ""}{pnlNum.toLocaleString()} USDT</div>
-                  {cap > 0 && log.pnl !== "" && (
-                    <div style={{ fontSize: 11, color: pnlNum >= 0 ? green : danger, marginTop: 2 }}>
-                      {pnlNum >= 0 ? "+" : ""}{((pnlNum / cap) * 100).toFixed(2)}% (시작금액 대비)
-                    </div>
-                  )}
+                  {cap > 0 && log.pnl !== "" && (() => {
+                    const todayPrev = balanceMap[todayKey]?.prev ?? currentBalance - pnlNum;
+                    const todayRor = todayPrev > 0 ? (pnlNum / todayPrev * 100) : null;
+                    return todayRor !== null ? (
+                      <div style={{ fontSize: 11, color: pnlNum >= 0 ? green : danger, marginTop: 2 }}>
+                        수익률 {pnlNum >= 0 ? "+" : ""}{todayRor.toFixed(2)}%
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 <div style={s.histMeta}>체크 {checkedCount}/{CHECKLIST_ITEMS.length}<br />위반 {violationCount}건</div>
               </div>
@@ -463,17 +498,73 @@ export default function App() {
             <div style={s.emptyHist}>아직 기록이 없습니다<br /><br />매매 후 일지를 작성해보세요</div>
           ) : historyDays.map(([key, d]) => {
             const p = parseFloat(d.pnl) || 0;
-            const pct = cap > 0 && d.pnl !== "" ? ((p / cap) * 100) : null;
+            const prevBal = balanceMap[key]?.prev;
+            const ror = cap > 0 && d.pnl !== "" && prevBal > 0 ? ((p / prevBal) * 100) : null;
             const violations = RULE_VIOLATIONS.filter((r) => d.violations?.[r.id]).length;
+
+            // 수정 모달
+            if (editingKey === key && editDraft) {
+              const ep = parseFloat(editDraft.pnl) || 0;
+              return (
+                <div key={key} style={{ ...s.histCard(p), border: `1.5px solid ${accent}` }}>
+                  <div style={{ fontSize: 10, color: accent, marginBottom: 12, letterSpacing: "0.1em" }}>— 수정 중 —</div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={s.fieldLbl}>자산</div>
+                    <div style={s.btnRow}>{ASSETS.map((a) => <button key={a} style={{ ...s.pill(editDraft.asset === a), padding: "5px 10px", fontSize: 10 }} onClick={() => setEditDraft({ ...editDraft, asset: a })}>{a}</button>)}</div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={s.fieldLbl}>방향</div>
+                    <div style={s.btnRow}>{["LONG", "SHORT", "양방향"].map((dir) => <button key={dir} style={{ ...s.pill(editDraft.direction === dir, dir === "SHORT" ? danger : dir === "LONG" ? green : gold), padding: "5px 10px", fontSize: 10 }} onClick={() => setEditDraft({ ...editDraft, direction: dir })}>{dir}</button>)}</div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={s.fieldLbl}>수익/손실 (USDT)</div>
+                    <input style={{ ...s.field, color: ep > 0 ? green : ep < 0 ? danger : text, fontWeight: 700, textAlign: "right" }}
+                      value={editDraft.pnl} onChange={(e) => setEditDraft({ ...editDraft, pnl: e.target.value })} type="number" />
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={s.fieldLbl}>메모</div>
+                    <textarea style={{ ...s.field, minHeight: 80, resize: "none", lineHeight: 1.5, fontSize: 12 }}
+                      value={editDraft.note} onChange={(e) => setEditDraft({ ...editDraft, note: e.target.value })} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={handleSaveEdit} style={{ flex: 1, padding: "10px", background: accent, color: "#000", border: "none", borderRadius: 8, fontWeight: 700, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>저장</button>
+                    <button onClick={() => { setEditingKey(null); setEditDraft(null); }} style={{ padding: "10px 16px", background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 8, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>취소</button>
+                  </div>
+                </div>
+              );
+            }
+
+            // 삭제 확인
+            if (deleteConfirm === key) {
+              return (
+                <div key={key} style={{ ...s.histCard(p), border: `1.5px solid ${danger}` }}>
+                  <div style={{ fontSize: 12, color: text, marginBottom: 14, lineHeight: 1.6 }}>
+                    <span style={{ color: danger, fontWeight: 700 }}>{key.replace(/-/g, ".")}</span> 기록을 삭제할까요?<br />
+                    <span style={{ fontSize: 11, color: sub }}>삭제 후 복구할 수 없어요.</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => handleDeleteEntry(key)} style={{ flex: 1, padding: "10px", background: danger, color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>삭제</button>
+                    <button onClick={() => setDeleteConfirm(null)} style={{ padding: "10px 16px", background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 8, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>취소</button>
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div key={key} style={s.histCard(p)}>
-                <div style={s.histDate}>{key.replace(/-/g, ".")} · {d.asset || "—"} {d.direction || ""}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={s.histDate}>{key.replace(/-/g, ".")} · {d.asset || "—"} {d.direction || ""}</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => handleEditEntry(key)} style={{ padding: "3px 10px", fontSize: 10, background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>수정</button>
+                    <button onClick={() => setDeleteConfirm(key)} style={{ padding: "3px 10px", fontSize: 10, background: "transparent", color: danger, border: `1px solid ${danger}30`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>삭제</button>
+                  </div>
+                </div>
                 <div style={s.histRow}>
                   <div>
                     <div style={s.histPnl(p)}>{d.pnl !== "" ? `${p >= 0 ? "+" : ""}${p.toLocaleString()} USDT` : "미기록"}</div>
-                    {pct !== null && (
+                    {ror !== null && (
                       <div style={{ fontSize: 11, color: p >= 0 ? green : danger, marginTop: 2 }}>
-                        {p >= 0 ? "+" : ""}{pct.toFixed(2)}% (시작금액 대비)
+                        수익률 {p >= 0 ? "+" : ""}{ror.toFixed(2)}%
                       </div>
                     )}
                   </div>
