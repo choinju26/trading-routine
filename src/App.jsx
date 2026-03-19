@@ -43,6 +43,8 @@ const EMPTY_LOG = () => ({
   pnl: "",
   emotion: "",
   note: "",
+  dailyBias: "",
+  biasNote: "",
   saved: false,
 });
 
@@ -107,6 +109,7 @@ export default function App() {
   const [log, setLog] = useState(EMPTY_LOG());
   const [history, setHistory] = useState({});
   const [saveAnim, setSaveAnim] = useState(false);
+  const [biasEditing, setBiasEditing] = useState(false);
   const [startCapital, setStartCapital] = useState("");
   const [editingCapital, setEditingCapital] = useState(false);
   const [capitalInput, setCapitalInput] = useState("");
@@ -252,6 +255,67 @@ export default function App() {
 
       {tab === "check" && (
         <div style={s.content}>
+
+          {/* DAILY BIAS */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 9, letterSpacing: "0.2em", color: sub, textTransform: "uppercase", marginBottom: 10 }}>Daily Bias</div>
+            {!biasEditing && !log.dailyBias ? (
+              <div
+                onClick={() => setBiasEditing(true)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "28px 16px", background: card, border: `2px dashed ${border}`, borderRadius: 14, cursor: "pointer" }}
+              >
+                <span style={{ fontSize: 13, color: muted, letterSpacing: "0.05em" }}>+ 오늘의 바이어스 입력</span>
+              </div>
+            ) : biasEditing ? (
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: 16 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  {["BULLISH 📈", "BEARISH 📉", "NEUTRAL ➡️"].map((b) => {
+                    const key = b.split(" ")[0];
+                    const isB = log.dailyBias === key;
+                    const col = key === "BULLISH" ? green : key === "BEARISH" ? danger : gold;
+                    return (
+                      <button key={key}
+                        onClick={() => setField("dailyBias", key)}
+                        style={{ flex: 1, padding: "10px 4px", borderRadius: 10, border: `1.5px solid ${isB ? col : border}`, background: isB ? `${col}18` : "transparent", color: isB ? col : sub, fontFamily: "inherit", fontSize: 11, fontWeight: isB ? 700 : 400, cursor: "pointer", transition: "all 0.2s" }}>
+                        {b}
+                      </button>
+                    );
+                  })}
+                </div>
+                <textarea
+                  style={{ ...s.field, minHeight: 72, resize: "none", lineHeight: 1.6, fontSize: 12, marginBottom: 10 }}
+                  placeholder="바이어스 근거 메모 (지지/저항, 추세, 뉴스 등)"
+                  value={log.biasNote}
+                  onChange={(e) => setField("biasNote", e.target.value)}
+                />
+                <button onClick={() => setBiasEditing(false)}
+                  style={{ width: "100%", padding: "10px", borderRadius: 8, border: "none", background: accent, color: "#000", fontWeight: 700, fontFamily: "inherit", fontSize: 11, cursor: "pointer", letterSpacing: "0.1em" }}>
+                  확인
+                </button>
+              </div>
+            ) : (
+              <div
+                onClick={() => setBiasEditing(true)}
+                style={{
+                  background: log.dailyBias === "BULLISH" ? "rgba(6,214,160,0.07)" : log.dailyBias === "BEARISH" ? "rgba(255,61,90,0.07)" : "rgba(255,209,102,0.07)",
+                  border: `1.5px solid ${log.dailyBias === "BULLISH" ? "rgba(6,214,160,0.3)" : log.dailyBias === "BEARISH" ? "rgba(255,61,90,0.3)" : "rgba(255,209,102,0.3)"}`,
+                  borderRadius: 14, padding: "18px 20px", cursor: "pointer"
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: log.biasNote ? 10 : 0 }}>
+                  <div style={{
+                    fontSize: 28, fontWeight: 900, letterSpacing: "0.05em",
+                    color: log.dailyBias === "BULLISH" ? green : log.dailyBias === "BEARISH" ? danger : gold
+                  }}>
+                    {log.dailyBias === "BULLISH" ? "📈 BULLISH" : log.dailyBias === "BEARISH" ? "📉 BEARISH" : "➡️ NEUTRAL"}
+                  </div>
+                  <span style={{ fontSize: 10, color: sub, letterSpacing: "0.1em" }}>수정 ✎</span>
+                </div>
+                {log.biasNote && <div style={{ fontSize: 12, color: sub, lineHeight: 1.6 }}>{log.biasNote}</div>}
+              </div>
+            )}
+          </div>
+
           <div style={s.section}>
             <div style={s.secTitle}>
               <span>매매 전 루틴</span><div style={s.secLine} />
