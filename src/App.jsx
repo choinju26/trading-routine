@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const CHECKLIST_ITEMS = [
   { id: "market", label: "시장 전반 상황 확인 (지수, 변동성)" },
@@ -46,22 +46,78 @@ const EMPTY_LOG = () => ({
   saved: false,
 });
 
+function BalanceChart({ data, startCapital, green, danger, border, sub }) {
+  if (!data || data.length < 2) return null;
+  const W = 440, H = 160, PAD = { top: 16, right: 16, bottom: 28, left: 60 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+  const balances = data.map((d) => d.balance);
+  const allVals = [startCapital, ...balances];
+  const minVal = Math.min(...allVals);
+  const maxVal = Math.max(...allVals);
+  const range = maxVal - minVal || 1;
+  const xScale = (i) => PAD.left + (i / data.length) * innerW;
+  const yScale = (v) => PAD.top + innerH - ((v - minVal) / range) * innerH;
+  const points = data.map((d, i) => `${xScale(i + 0.5)},${yScale(d.balance)}`);
+  const startX = PAD.left;
+  const startY = yScale(startCapital);
+  const linePath = `M${startX},${startY} ` + points.map((p) => `L${p}`).join(" ");
+  const lastX = xScale(data.length - 0.5);
+  const lastY = yScale(data[data.length - 1].balance);
+  const areaPath = `${linePath} L${lastX},${PAD.top + innerH} L${startX},${PAD.top + innerH} Z`;
+  const finalBalance = balances[balances.length - 1];
+  const lineColor = finalBalance >= startCapital ? green : danger;
+  const yLabels = [minVal, (minVal + maxVal) / 2, maxVal].map((v) => ({
+    val: v, y: yScale(v),
+    label: v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v.toFixed(0),
+  }));
+  const step = Math.max(1, Math.floor(data.length / 4));
+  const xLabels = data
+    .filter((_, i) => i % step === 0 || i === data.length - 1)
+    .map((d) => ({ label: d.key.split("-").slice(1).join("/"), x: xScale(data.indexOf(d) + 0.5) }));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+      <defs>
+        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={lineColor} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={lineColor} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      {yLabels.map((l, i) => (
+        <line key={i} x1={PAD.left} x2={W - PAD.right} y1={l.y} y2={l.y} stroke={border} strokeWidth="1" strokeDasharray="3,4" />
+      ))}
+      <path d={areaPath} fill="url(#areaGrad)" />
+      <path d={linePath} fill="none" stroke={lineColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={startX} cy={startY} r="3" fill={sub} />
+      <circle cx={lastX} cy={lastY} r="4" fill={lineColor} />
+      {yLabels.map((l, i) => (
+        <text key={i} x={PAD.left - 6} y={l.y + 4} textAnchor="end" fontSize="9" fill={sub} fontFamily="'IBM Plex Mono', monospace">{l.label}</text>
+      ))}
+      {xLabels.map((l, i) => (
+        <text key={i} x={l.x} y={H - 4} textAnchor="middle" fontSize="9" fill={sub} fontFamily="'IBM Plex Mono', monospace">{l.label}</text>
+      ))}
+    </svg>
+  );
+}
+
 export default function App() {
-  const [tab, setTab] = useState("check"); // check | journal | history
+  const [tab, setTab] = useState("check");
   const [todayKey] = useState(getTodayKey());
   const [log, setLog] = useState(EMPTY_LOG());
   const [history, setHistory] = useState({});
-  const [saved, setSaved] = useState(false);
   const [saveAnim, setSaveAnim] = useState(false);
+  const [startCapital, setStartCapital] = useState("");
+  const [editingCapital, setEditingCapital] = useState(false);
+  const [capitalInput, setCapitalInput] = useState("");
 
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem("tradeHistory") || "{}");
       setHistory(stored);
-      if (stored[todayKey]) {
-        setLog(stored[todayKey]);
-        setSaved(stored[todayKey].saved || false);
-      }
+      if (stored[todayKey]) setLog(stored[todayKey]);
+      const cap = localStorage.getItem("startCapital");
+      if (cap) setStartCapital(cap);
     } catch {}
   }, []);
 
@@ -73,543 +129,302 @@ export default function App() {
 
   const toggleCheck = (id) => {
     const newLog = { ...log, checklist: { ...log.checklist, [id]: !log.checklist[id] } };
-    setLog(newLog);
-    updateHistory(newLog);
+    setLog(newLog); updateHistory(newLog);
   };
 
   const toggleViolation = (id) => {
     const newLog = { ...log, violations: { ...log.violations, [id]: !log.violations[id] } };
-    setLog(newLog);
-    updateHistory(newLog);
+    setLog(newLog); updateHistory(newLog);
   };
 
   const setField = (key, val) => {
     const newLog = { ...log, [key]: val };
-    setLog(newLog);
-    updateHistory(newLog);
+    setLog(newLog); updateHistory(newLog);
   };
 
   const handleSave = () => {
     const newLog = { ...log, saved: true };
-    setLog(newLog);
     updateHistory(newLog);
-    setSaved(true);
     setSaveAnim(true);
-    setTimeout(() => setSaveAnim(false), 1200);
+    setTimeout(() => {
+      setSaveAnim(false);
+      // 저장 후 일지 필드만 초기화 (체크리스트는 유지)
+      setLog({ ...EMPTY_LOG(), checklist: newLog.checklist, violations: newLog.violations, saved: true });
+    }, 1200);
+  };
+
+  const saveCapital = () => {
+    const val = capitalInput.replace(/,/g, "");
+    if (!isNaN(val) && val !== "") {
+      setStartCapital(val);
+      localStorage.setItem("startCapital", val);
+    }
+    setEditingCapital(false);
+    setCapitalInput("");
   };
 
   const checkedCount = CHECKLIST_ITEMS.filter((i) => log.checklist[i.id]).length;
   const checkPct = Math.round((checkedCount / CHECKLIST_ITEMS.length) * 100);
   const violationCount = RULE_VIOLATIONS.filter((i) => log.violations[i.id]).length;
   const pnlNum = parseFloat(log.pnl) || 0;
+  const historyDays = Object.entries(history).filter(([k]) => k !== todayKey).sort(([a], [b]) => (a < b ? 1 : -1)).slice(0, 30);
 
-  const historyDays = Object.entries(history)
-    .filter(([k]) => k !== todayKey)
-    .sort(([a], [b]) => (a < b ? 1 : -1))
-    .slice(0, 14);
+  const cap = parseFloat(startCapital) || 0;
+  const sortedAll = Object.entries(history).filter(([, d]) => d.saved && d.pnl !== "").sort(([a], [b]) => (a < b ? -1 : 1));
+  let running = cap;
+  const chartData = sortedAll.map(([key, d]) => { running += parseFloat(d.pnl) || 0; return { key, balance: running }; });
 
-  const accent = "#00E5FF";
-  const danger = "#FF3D5A";
-  const gold = "#FFD166";
-  const green = "#06D6A0";
-  const bg = "#0A0C0F";
-  const card = "#111418";
-  const border = "#1E2329";
-  const muted = "#4B5563";
-  const text = "#E8ECF0";
-  const sub = "#8B95A1";
-
-  const styles = {
-    app: {
-      minHeight: "100vh",
-      background: bg,
-      color: text,
-      fontFamily: "'IBM Plex Mono', 'Courier New', monospace",
-      maxWidth: 480,
-      margin: "0 auto",
-      paddingBottom: 80,
-    },
-    header: {
-      padding: "20px 20px 0",
-      borderBottom: `1px solid ${border}`,
-    },
-    headerTop: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      marginBottom: 8,
-    },
-    title: {
-      fontSize: 11,
-      letterSpacing: "0.2em",
-      color: accent,
-      textTransform: "uppercase",
-      marginBottom: 2,
-    },
-    date: {
-      fontSize: 18,
-      fontWeight: 700,
-      color: text,
-      letterSpacing: "-0.02em",
-    },
-    scoreBadge: {
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "flex-end",
-    },
-    scoreNum: {
-      fontSize: 28,
-      fontWeight: 700,
-      color: checkPct === 100 ? green : checkPct >= 75 ? gold : accent,
-      lineHeight: 1,
-    },
-    scoreLabel: { fontSize: 9, color: sub, letterSpacing: "0.15em", textTransform: "uppercase" },
-    progressBar: {
-      height: 3,
-      background: border,
-      margin: "12px 0 0",
-      position: "relative",
-      overflow: "hidden",
-    },
-    progressFill: {
-      height: "100%",
-      width: `${checkPct}%`,
-      background: checkPct === 100 ? green : accent,
-      transition: "width 0.4s ease",
-    },
-    tabs: {
-      display: "flex",
-      borderBottom: `1px solid ${border}`,
-      background: card,
-    },
-    tab: (active) => ({
-      flex: 1,
-      padding: "14px 8px",
-      fontSize: 10,
-      letterSpacing: "0.15em",
-      textTransform: "uppercase",
-      border: "none",
-      background: "none",
-      cursor: "pointer",
-      color: active ? accent : muted,
-      borderBottom: active ? `2px solid ${accent}` : "2px solid transparent",
-      transition: "all 0.2s",
-      fontFamily: "inherit",
-    }),
-    content: { padding: "16px 16px 0" },
-    section: { marginBottom: 20 },
-    sectionTitle: {
-      fontSize: 9,
-      letterSpacing: "0.2em",
-      color: accent,
-      textTransform: "uppercase",
-      marginBottom: 10,
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-    },
-    sectionLine: { flex: 1, height: 1, background: border },
-    checkItem: (checked) => ({
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-      padding: "12px 14px",
-      marginBottom: 4,
-      background: checked ? "rgba(0,229,255,0.04)" : card,
-      border: `1px solid ${checked ? "rgba(0,229,255,0.2)" : border}`,
-      borderRadius: 8,
-      cursor: "pointer",
-      transition: "all 0.2s",
-    }),
-    checkbox: (checked) => ({
-      width: 18,
-      height: 18,
-      border: `1.5px solid ${checked ? accent : muted}`,
-      borderRadius: 4,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      flexShrink: 0,
-      background: checked ? accent : "transparent",
-      transition: "all 0.2s",
-    }),
-    checkLabel: (checked) => ({
-      fontSize: 12,
-      color: checked ? text : sub,
-      lineHeight: 1.4,
-      transition: "color 0.2s",
-    }),
-    violationItem: (checked) => ({
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-      padding: "11px 14px",
-      marginBottom: 4,
-      background: checked ? "rgba(255,61,90,0.07)" : card,
-      border: `1px solid ${checked ? "rgba(255,61,90,0.35)" : border}`,
-      borderRadius: 8,
-      cursor: "pointer",
-      transition: "all 0.2s",
-    }),
-    vBox: (checked) => ({
-      width: 18,
-      height: 18,
-      border: `1.5px solid ${checked ? danger : muted}`,
-      borderRadius: 4,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      flexShrink: 0,
-      background: checked ? danger : "transparent",
-      transition: "all 0.2s",
-    }),
-    field: {
-      width: "100%",
-      background: card,
-      border: `1px solid ${border}`,
-      borderRadius: 8,
-      padding: "11px 14px",
-      color: text,
-      fontSize: 13,
-      fontFamily: "inherit",
-      outline: "none",
-      boxSizing: "border-box",
-    },
-    fieldLabel: {
-      fontSize: 9,
-      color: sub,
-      letterSpacing: "0.15em",
-      textTransform: "uppercase",
-      marginBottom: 6,
-    },
-    row: { display: "flex", gap: 10, marginBottom: 10 },
-    col: { flex: 1 },
-    btnRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 },
-    pill: (active, color = accent) => ({
-      padding: "7px 14px",
-      borderRadius: 20,
-      fontSize: 11,
-      border: `1px solid ${active ? color : border}`,
-      background: active ? `${color}18` : "transparent",
-      color: active ? color : sub,
-      cursor: "pointer",
-      fontFamily: "inherit",
-      transition: "all 0.2s",
-    }),
-    pnlInput: {
-      width: "100%",
-      background: card,
-      border: `1px solid ${pnlNum > 0 ? "rgba(6,214,160,0.4)" : pnlNum < 0 ? "rgba(255,61,90,0.4)" : border}`,
-      borderRadius: 8,
-      padding: "11px 14px",
-      color: pnlNum > 0 ? green : pnlNum < 0 ? danger : text,
-      fontSize: 16,
-      fontWeight: 700,
-      fontFamily: "inherit",
-      outline: "none",
-      boxSizing: "border-box",
-      textAlign: "right",
-    },
-    saveBtn: {
-      width: "100%",
-      padding: "15px",
-      borderRadius: 10,
-      border: "none",
-      background: saveAnim ? green : `linear-gradient(135deg, ${accent}, #0099B4)`,
-      color: "#000",
-      fontSize: 12,
-      fontWeight: 700,
-      letterSpacing: "0.2em",
-      textTransform: "uppercase",
-      cursor: "pointer",
-      fontFamily: "inherit",
-      transition: "all 0.3s",
-      marginTop: 8,
-    },
-    histCard: (pnl) => ({
-      padding: "14px",
-      marginBottom: 8,
-      background: card,
-      border: `1px solid ${border}`,
-      borderRadius: 10,
-      borderLeft: `3px solid ${pnl > 0 ? green : pnl < 0 ? danger : muted}`,
-    }),
-    histDate: { fontSize: 10, color: sub, marginBottom: 6, letterSpacing: "0.05em" },
-    histRow: { display: "flex", justifyContent: "space-between", alignItems: "center" },
-    histPnl: (pnl) => ({
-      fontSize: 18,
-      fontWeight: 700,
-      color: pnl > 0 ? green : pnl < 0 ? danger : muted,
-    }),
-    histMeta: { fontSize: 10, color: sub, textAlign: "right" },
-    histNote: { fontSize: 11, color: sub, marginTop: 6, lineHeight: 1.5 },
-    emptyHist: { textAlign: "center", color: muted, fontSize: 12, padding: "40px 0", letterSpacing: "0.05em" },
-    statRow: { display: "flex", gap: 8, marginBottom: 16 },
-    statCard: {
-      flex: 1,
-      background: card,
-      border: `1px solid ${border}`,
-      borderRadius: 10,
-      padding: "14px 12px",
-      textAlign: "center",
-    },
-    statVal: (color) => ({ fontSize: 20, fontWeight: 700, color: color || text }),
-    statLbl: { fontSize: 9, color: sub, letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 3 },
-    navBar: {
-      position: "fixed",
-      bottom: 0,
-      left: "50%",
-      transform: "translateX(-50%)",
-      width: "100%",
-      maxWidth: 480,
-      background: card,
-      borderTop: `1px solid ${border}`,
-      display: "flex",
-    },
-    navBtn: (active) => ({
-      flex: 1,
-      padding: "14px 8px 18px",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      gap: 4,
-      border: "none",
-      background: "none",
-      cursor: "pointer",
-      color: active ? accent : muted,
-      fontFamily: "inherit",
-      fontSize: 9,
-      letterSpacing: "0.1em",
-      textTransform: "uppercase",
-      transition: "color 0.2s",
-    }),
-  };
-
-  // History stats
   const allDays = Object.values(history);
   const totalPnl = allDays.reduce((s, d) => s + (parseFloat(d.pnl) || 0), 0);
   const winDays = allDays.filter((d) => (parseFloat(d.pnl) || 0) > 0).length;
   const tradeDays = allDays.filter((d) => d.pnl !== "").length;
   const winRate = tradeDays > 0 ? Math.round((winDays / tradeDays) * 100) : 0;
+  const currentBalance = cap + totalPnl;
+  const totalViolations = allDays.reduce((s, d) => s + Object.values(d.violations || {}).filter(Boolean).length, 0);
+
+  const accent = "#00E5FF", danger = "#FF3D5A", gold = "#FFD166", green = "#06D6A0";
+  const bg = "#0A0C0F", card = "#111418", border = "#1E2329", muted = "#4B5563", text = "#E8ECF0", sub = "#8B95A1";
+
+  const s = {
+    app: { minHeight: "100vh", background: bg, color: text, fontFamily: "'IBM Plex Mono','Courier New',monospace", maxWidth: 480, margin: "0 auto", paddingBottom: 80 },
+    header: { padding: "20px 20px 0", borderBottom: `1px solid ${border}` },
+    headerTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 },
+    title: { fontSize: 11, letterSpacing: "0.2em", color: accent, textTransform: "uppercase", marginBottom: 2 },
+    date: { fontSize: 18, fontWeight: 700, color: text, letterSpacing: "-0.02em" },
+    scoreNum: { fontSize: 28, fontWeight: 700, color: checkPct === 100 ? green : checkPct >= 75 ? gold : accent, lineHeight: 1 },
+    scoreLabel: { fontSize: 9, color: sub, letterSpacing: "0.15em", textTransform: "uppercase" },
+    progressBar: { height: 3, background: border, margin: "12px 0 0", overflow: "hidden" },
+    progressFill: { height: "100%", width: `${checkPct}%`, background: checkPct === 100 ? green : accent, transition: "width 0.4s ease" },
+    tabs: { display: "flex", borderBottom: `1px solid ${border}`, background: card },
+    tab: (a) => ({ flex: 1, padding: "14px 8px", fontSize: 10, letterSpacing: "0.15em", textTransform: "uppercase", border: "none", background: "none", cursor: "pointer", color: a ? accent : muted, borderBottom: a ? `2px solid ${accent}` : "2px solid transparent", transition: "all 0.2s", fontFamily: "inherit" }),
+    content: { padding: "16px 16px 0" },
+    section: { marginBottom: 20 },
+    secTitle: { fontSize: 9, letterSpacing: "0.2em", color: accent, textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 },
+    secLine: { flex: 1, height: 1, background: border },
+    checkItem: (c) => ({ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", marginBottom: 4, background: c ? "rgba(0,229,255,0.04)" : card, border: `1px solid ${c ? "rgba(0,229,255,0.2)" : border}`, borderRadius: 8, cursor: "pointer", transition: "all 0.2s" }),
+    checkbox: (c) => ({ width: 18, height: 18, border: `1.5px solid ${c ? accent : muted}`, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c ? accent : "transparent", transition: "all 0.2s" }),
+    chkLabel: (c) => ({ fontSize: 12, color: c ? text : sub, lineHeight: 1.4 }),
+    vioItem: (c) => ({ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", marginBottom: 4, background: c ? "rgba(255,61,90,0.07)" : card, border: `1px solid ${c ? "rgba(255,61,90,0.35)" : border}`, borderRadius: 8, cursor: "pointer", transition: "all 0.2s" }),
+    vBox: (c) => ({ width: 18, height: 18, border: `1.5px solid ${c ? danger : muted}`, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c ? danger : "transparent", transition: "all 0.2s" }),
+    field: { width: "100%", background: card, border: `1px solid ${border}`, borderRadius: 8, padding: "11px 14px", color: text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
+    fieldLbl: { fontSize: 9, color: sub, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 },
+    row: { display: "flex", gap: 10, marginBottom: 10 },
+    col: { flex: 1 },
+    btnRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 },
+    pill: (a, c = accent) => ({ padding: "7px 14px", borderRadius: 20, fontSize: 11, border: `1px solid ${a ? c : border}`, background: a ? `${c}18` : "transparent", color: a ? c : sub, cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s" }),
+    pnlInput: { width: "100%", background: card, border: `1px solid ${pnlNum > 0 ? "rgba(6,214,160,0.4)" : pnlNum < 0 ? "rgba(255,61,90,0.4)" : border}`, borderRadius: 8, padding: "11px 14px", color: pnlNum > 0 ? green : pnlNum < 0 ? danger : text, fontSize: 16, fontWeight: 700, fontFamily: "inherit", outline: "none", boxSizing: "border-box", textAlign: "right" },
+    saveBtn: { width: "100%", padding: "15px", borderRadius: 10, border: "none", background: saveAnim ? green : `linear-gradient(135deg,${accent},#0099B4)`, color: "#000", fontSize: 12, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit", transition: "all 0.3s", marginTop: 8 },
+    histCard: (p) => ({ padding: "14px", marginBottom: 8, background: card, border: `1px solid ${border}`, borderRadius: 10, borderLeft: `3px solid ${p > 0 ? green : p < 0 ? danger : muted}` }),
+    histDate: { fontSize: 10, color: sub, marginBottom: 6 },
+    histRow: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+    histPnl: (p) => ({ fontSize: 18, fontWeight: 700, color: p > 0 ? green : p < 0 ? danger : muted }),
+    histMeta: { fontSize: 10, color: sub, textAlign: "right" },
+    histNote: { fontSize: 11, color: sub, marginTop: 6, lineHeight: 1.5 },
+    emptyHist: { textAlign: "center", color: muted, fontSize: 12, padding: "40px 0" },
+    statRow: { display: "flex", gap: 8, marginBottom: 12 },
+    statCard: { flex: 1, background: card, border: `1px solid ${border}`, borderRadius: 10, padding: "14px 12px", textAlign: "center" },
+    statVal: (c) => ({ fontSize: 18, fontWeight: 700, color: c || text }),
+    statLbl: { fontSize: 9, color: sub, letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 3 },
+    navBar: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: card, borderTop: `1px solid ${border}`, display: "flex" },
+    navBtn: (a) => ({ flex: 1, padding: "14px 8px 18px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, border: "none", background: "none", cursor: "pointer", color: a ? accent : muted, fontFamily: "inherit", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", transition: "color 0.2s" }),
+  };
 
   return (
-    <div style={styles.app}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerTop}>
+    <div style={s.app}>
+      <div style={s.header}>
+        <div style={s.headerTop}>
           <div>
-            <div style={styles.title}>Trading Routine</div>
-            <div style={styles.date}>{formatDate(new Date())}</div>
+            <div style={s.title}>Trading Routine</div>
+            <div style={s.date}>{formatDate(new Date())}</div>
           </div>
-          <div style={styles.scoreBadge}>
-            <div style={styles.scoreNum}>{checkPct}%</div>
-            <div style={styles.scoreLabel}>Ready</div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+            <div style={s.scoreNum}>{checkPct}%</div>
+            <div style={s.scoreLabel}>Ready</div>
           </div>
         </div>
-        <div style={styles.progressBar}>
-          <div style={styles.progressFill} />
-        </div>
-        <div style={styles.tabs}>
+        <div style={s.progressBar}><div style={s.progressFill} /></div>
+        <div style={s.tabs}>
           {[["check", "체크리스트"], ["journal", "매매일지"], ["history", "히스토리"]].map(([k, l]) => (
-            <button key={k} style={styles.tab(tab === k)} onClick={() => setTab(k)}>{l}</button>
+            <button key={k} style={s.tab(tab === k)} onClick={() => setTab(k)}>{l}</button>
           ))}
         </div>
       </div>
 
-      {/* Checklist Tab */}
       {tab === "check" && (
-        <div style={styles.content}>
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>
-              <span>매매 전 루틴</span>
-              <div style={styles.sectionLine} />
+        <div style={s.content}>
+          <div style={s.section}>
+            <div style={s.secTitle}>
+              <span>매매 전 루틴</span><div style={s.secLine} />
               <span style={{ color: sub, fontSize: 10 }}>{checkedCount}/{CHECKLIST_ITEMS.length}</span>
             </div>
             {CHECKLIST_ITEMS.map((item) => (
-              <div key={item.id} style={styles.checkItem(!!log.checklist[item.id])} onClick={() => toggleCheck(item.id)}>
-                <div style={styles.checkbox(!!log.checklist[item.id])}>
+              <div key={item.id} style={s.checkItem(!!log.checklist[item.id])} onClick={() => toggleCheck(item.id)}>
+                <div style={s.checkbox(!!log.checklist[item.id])}>
                   {log.checklist[item.id] && <span style={{ fontSize: 11, color: "#000", fontWeight: 900 }}>✓</span>}
                 </div>
-                <span style={styles.checkLabel(!!log.checklist[item.id])}>{item.label}</span>
+                <span style={s.chkLabel(!!log.checklist[item.id])}>{item.label}</span>
               </div>
             ))}
           </div>
-
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>
+          <div style={s.section}>
+            <div style={s.secTitle}>
               <span style={{ color: danger }}>규칙 위반 체크</span>
-              <div style={{ ...styles.sectionLine, background: "rgba(255,61,90,0.2)" }} />
-              {violationCount > 0 && (
-                <span style={{ color: danger, fontSize: 10 }}>{violationCount}건</span>
-              )}
+              <div style={{ ...s.secLine, background: "rgba(255,61,90,0.2)" }} />
+              {violationCount > 0 && <span style={{ color: danger, fontSize: 10 }}>{violationCount}건</span>}
             </div>
             {RULE_VIOLATIONS.map((item) => (
-              <div key={item.id} style={styles.violationItem(!!log.violations[item.id])} onClick={() => toggleViolation(item.id)}>
-                <div style={styles.vBox(!!log.violations[item.id])}>
+              <div key={item.id} style={s.vioItem(!!log.violations[item.id])} onClick={() => toggleViolation(item.id)}>
+                <div style={s.vBox(!!log.violations[item.id])}>
                   {log.violations[item.id] && <span style={{ fontSize: 11, color: "#fff", fontWeight: 900 }}>!</span>}
                 </div>
-                <span style={{ ...styles.checkLabel(true), color: log.violations[item.id] ? danger : sub }}>{item.label}</span>
+                <span style={{ ...s.chkLabel(true), color: log.violations[item.id] ? danger : sub }}>{item.label}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Journal Tab */}
       {tab === "journal" && (
-        <div style={styles.content}>
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>
-              <span>거래 정보</span>
-              <div style={styles.sectionLine} />
-            </div>
-
+        <div style={s.content}>
+          <div style={s.section}>
+            <div style={s.secTitle}><span>거래 정보</span><div style={s.secLine} /></div>
             <div style={{ marginBottom: 10 }}>
-              <div style={styles.fieldLabel}>자산</div>
-              <div style={styles.btnRow}>
-                {ASSETS.map((a) => (
-                  <button key={a} style={styles.pill(log.asset === a)} onClick={() => setField("asset", a)}>{a}</button>
-                ))}
-              </div>
+              <div style={s.fieldLbl}>자산</div>
+              <div style={s.btnRow}>{ASSETS.map((a) => <button key={a} style={s.pill(log.asset === a)} onClick={() => setField("asset", a)}>{a}</button>)}</div>
             </div>
-
             <div style={{ marginBottom: 10 }}>
-              <div style={styles.fieldLabel}>방향</div>
-              <div style={styles.btnRow}>
-                {["LONG", "SHORT", "양방향"].map((d) => (
-                  <button key={d} style={styles.pill(log.direction === d, d === "SHORT" ? danger : d === "LONG" ? green : gold)}
-                    onClick={() => setField("direction", d)}>{d}</button>
-                ))}
-              </div>
+              <div style={s.fieldLbl}>방향</div>
+              <div style={s.btnRow}>{["LONG", "SHORT", "양방향"].map((d) => (
+                <button key={d} style={s.pill(log.direction === d, d === "SHORT" ? danger : d === "LONG" ? green : gold)} onClick={() => setField("direction", d)}>{d}</button>
+              ))}</div>
             </div>
-
-            <div style={styles.row}>
-              <div style={styles.col}>
-                <div style={styles.fieldLabel}>진입가</div>
-                <input style={styles.field} placeholder="0.00" value={log.entry}
-                  onChange={(e) => setField("entry", e.target.value)} type="number" />
-              </div>
-              <div style={styles.col}>
-                <div style={styles.fieldLabel}>청산가</div>
-                <input style={styles.field} placeholder="0.00" value={log.exit}
-                  onChange={(e) => setField("exit", e.target.value)} type="number" />
-              </div>
+            <div style={s.row}>
+              <div style={s.col}><div style={s.fieldLbl}>진입가</div><input style={s.field} placeholder="0.00" value={log.entry} onChange={(e) => setField("entry", e.target.value)} type="number" /></div>
+              <div style={s.col}><div style={s.fieldLbl}>청산가</div><input style={s.field} placeholder="0.00" value={log.exit} onChange={(e) => setField("exit", e.target.value)} type="number" /></div>
             </div>
-
             <div style={{ marginBottom: 10 }}>
-              <div style={styles.fieldLabel}>수익/손실 (₩ or %)</div>
-              <input style={styles.pnlInput} placeholder="0" value={log.pnl}
-                onChange={(e) => setField("pnl", e.target.value)} type="number" />
+              <div style={s.fieldLbl}>수익/손실 (USDT)</div>
+              <input style={s.pnlInput} placeholder="0" value={log.pnl} onChange={(e) => setField("pnl", e.target.value)} type="number" />
             </div>
           </div>
-
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>
-              <span>심리 & 회고</span>
-              <div style={styles.sectionLine} />
-            </div>
-
+          <div style={s.section}>
+            <div style={s.secTitle}><span>심리 & 회고</span><div style={s.secLine} /></div>
             <div style={{ marginBottom: 10 }}>
-              <div style={styles.fieldLabel}>매매 당시 심리</div>
-              <div style={styles.btnRow}>
-                {EMOTIONS.map((e) => (
-                  <button key={e} style={{ ...styles.pill(log.emotion === e, gold), fontSize: 12 }}
-                    onClick={() => setField("emotion", e)}>{e}</button>
-                ))}
-              </div>
+              <div style={s.fieldLbl}>매매 당시 심리</div>
+              <div style={s.btnRow}>{EMOTIONS.map((e) => <button key={e} style={{ ...s.pill(log.emotion === e, gold), fontSize: 12 }} onClick={() => setField("emotion", e)}>{e}</button>)}</div>
             </div>
-
             <div style={{ marginBottom: 14 }}>
-              <div style={styles.fieldLabel}>매매 일지</div>
-              <textarea style={{ ...styles.field, minHeight: 120, resize: "vertical", lineHeight: 1.6 }}
+              <div style={s.fieldLbl}>매매 일지</div>
+              <textarea style={{ ...s.field, minHeight: 120, resize: "vertical", lineHeight: 1.6 }}
                 placeholder={"시나리오대로 진행됐나?\n잘된 점 / 개선할 점\n다음에 적용할 교훈"}
                 value={log.note} onChange={(e) => setField("note", e.target.value)} />
             </div>
-
-            <button style={styles.saveBtn} onClick={handleSave}>
-              {saveAnim ? "✓ 저장 완료" : "오늘 일지 저장"}
-            </button>
+            <button style={s.saveBtn} onClick={handleSave}>{saveAnim ? "✓ 저장 완료" : "오늘 일지 저장"}</button>
           </div>
         </div>
       )}
 
-      {/* History Tab */}
       {tab === "history" && (
-        <div style={styles.content}>
-          <div style={styles.statRow}>
-            <div style={styles.statCard}>
-              <div style={styles.statVal(totalPnl >= 0 ? green : danger)}>
-                {totalPnl >= 0 ? "+" : ""}{totalPnl.toLocaleString()}
+        <div style={s.content}>
+          {/* 보유금액 카드 */}
+          <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ fontSize: 9, color: sub, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 10 }}>보유금액 현황</div>
+            {editingCapital ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input style={{ ...s.field, flex: 1, fontSize: 15, fontWeight: 700 }} placeholder="시작 금액 (USDT)" value={capitalInput}
+                  onChange={(e) => setCapitalInput(e.target.value)} type="number" autoFocus />
+                <button onClick={saveCapital} style={{ padding: "11px 16px", background: accent, color: "#000", border: "none", borderRadius: 8, fontWeight: 700, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>저장</button>
+                <button onClick={() => { setEditingCapital(false); setCapitalInput(""); }} style={{ padding: "11px 12px", background: "transparent", color: sub, border: `1px solid ${border}`, borderRadius: 8, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>취소</button>
               </div>
-              <div style={styles.statLbl}>누적 손익</div>
-            </div>
-            <div style={styles.statCard}>
-              <div style={styles.statVal(winRate >= 50 ? green : danger)}>{winRate}%</div>
-              <div style={styles.statLbl}>승률</div>
-            </div>
-            <div style={styles.statCard}>
-              <div style={styles.statVal()}>{tradeDays}</div>
-              <div style={styles.statLbl}>거래일</div>
-            </div>
-          </div>
-
-          <div style={styles.sectionTitle}>
-            <span>최근 기록</span>
-            <div style={styles.sectionLine} />
-          </div>
-
-          {/* Today */}
-          {log.pnl !== "" || log.note !== "" ? (
-            <div style={styles.histCard(pnlNum)}>
-              <div style={styles.histDate}>오늘 · {log.asset || "—"} {log.direction || ""}</div>
-              <div style={styles.histRow}>
-                <div style={styles.histPnl(pnlNum)}>
-                  {pnlNum >= 0 ? "+" : ""}{pnlNum.toLocaleString()}
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+                <div>
+                  <div style={{ fontSize: 10, color: sub, marginBottom: 4 }}>시작금액 {cap > 0 ? `${cap.toLocaleString()} USDT` : "미설정"}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: cap > 0 ? (currentBalance >= cap ? green : danger) : sub }}>
+                    {cap > 0 ? `${currentBalance.toLocaleString()} USDT` : "—"}
+                  </div>
                 </div>
-                <div style={styles.histMeta}>
-                  체크 {checkedCount}/{CHECKLIST_ITEMS.length}<br />
-                  위반 {violationCount}건
+                <div style={{ textAlign: "right" }}>
+                  {cap > 0 && (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: totalPnl >= 0 ? green : danger }}>{totalPnl >= 0 ? "+" : ""}{totalPnl.toLocaleString()}</div>
+                      <div style={{ fontSize: 10, color: sub }}>({((totalPnl / cap) * 100).toFixed(2)}%)</div>
+                    </>
+                  )}
+                  <button onClick={() => { setEditingCapital(true); setCapitalInput(startCapital); }}
+                    style={{ marginTop: 8, padding: "5px 12px", background: "transparent", color: accent, border: `1px solid ${accent}30`, borderRadius: 6, fontFamily: "inherit", fontSize: 10, cursor: "pointer", letterSpacing: "0.1em" }}>
+                    {cap > 0 ? "수정" : "+ 시작금액 설정"}
+                  </button>
                 </div>
               </div>
-              {log.note && <div style={styles.histNote}>{log.note.slice(0, 80)}{log.note.length > 80 ? "..." : ""}</div>}
+            )}
+          </div>
+
+          {/* 잔고 그래프 */}
+          {chartData.length >= 2 && cap > 0 && (
+            <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 12, padding: "14px 8px 8px", marginBottom: 12, overflow: "hidden" }}>
+              <div style={{ fontSize: 9, color: sub, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 8, paddingLeft: 8 }}>잔고 추이</div>
+              <BalanceChart data={chartData} startCapital={cap} green={green} danger={danger} border={border} sub={sub} />
             </div>
-          ) : null}
+          )}
+
+          {/* 통계 */}
+          <div style={s.statRow}>
+            <div style={s.statCard}><div style={s.statVal(winRate >= 50 ? green : danger)}>{winRate}%</div><div style={s.statLbl}>승률</div></div>
+            <div style={s.statCard}><div style={s.statVal()}>{tradeDays}</div><div style={s.statLbl}>거래일</div></div>
+            <div style={s.statCard}><div style={s.statVal(totalViolations === 0 ? green : danger)}>{totalViolations}</div><div style={s.statLbl}>총 위반</div></div>
+          </div>
+
+          <div style={s.secTitle}><span>최근 기록</span><div style={s.secLine} /></div>
+
+          {(log.pnl !== "" || log.note !== "") && (
+            <div style={s.histCard(pnlNum)}>
+              <div style={s.histDate}>오늘 · {log.asset || "—"} {log.direction || ""}</div>
+              <div style={s.histRow}>
+                <div>
+                  <div style={s.histPnl(pnlNum)}>{pnlNum >= 0 ? "+" : ""}{pnlNum.toLocaleString()} USDT</div>
+                  {cap > 0 && log.pnl !== "" && (
+                    <div style={{ fontSize: 11, color: pnlNum >= 0 ? green : danger, marginTop: 2 }}>
+                      {pnlNum >= 0 ? "+" : ""}{((pnlNum / cap) * 100).toFixed(2)}% (시작금액 대비)
+                    </div>
+                  )}
+                </div>
+                <div style={s.histMeta}>체크 {checkedCount}/{CHECKLIST_ITEMS.length}<br />위반 {violationCount}건</div>
+              </div>
+              {log.note && <div style={s.histNote}>{log.note.slice(0, 80)}{log.note.length > 80 ? "..." : ""}</div>}
+            </div>
+          )}
 
           {historyDays.length === 0 && !log.pnl ? (
-            <div style={styles.emptyHist}>아직 기록이 없습니다<br /><br />매매 후 일지를 작성해보세요</div>
-          ) : (
-            historyDays.map(([key, d]) => {
-              const p = parseFloat(d.pnl) || 0;
-              const dateStr = key.replace(/-/g, ".");
-              const violations = RULE_VIOLATIONS.filter((r) => d.violations?.[r.id]).length;
-              return (
-                <div key={key} style={styles.histCard(p)}>
-                  <div style={styles.histDate}>{dateStr} · {d.asset || "—"} {d.direction || ""}</div>
-                  <div style={styles.histRow}>
-                    <div style={styles.histPnl(p)}>
-                      {d.pnl !== "" ? `${p >= 0 ? "+" : ""}${p.toLocaleString()}` : "미기록"}
-                    </div>
-                    <div style={styles.histMeta}>
-                      위반 {violations}건
-                      {d.emotion && <><br />{d.emotion}</>}
-                    </div>
+            <div style={s.emptyHist}>아직 기록이 없습니다<br /><br />매매 후 일지를 작성해보세요</div>
+          ) : historyDays.map(([key, d]) => {
+            const p = parseFloat(d.pnl) || 0;
+            const pct = cap > 0 && d.pnl !== "" ? ((p / cap) * 100) : null;
+            const violations = RULE_VIOLATIONS.filter((r) => d.violations?.[r.id]).length;
+            return (
+              <div key={key} style={s.histCard(p)}>
+                <div style={s.histDate}>{key.replace(/-/g, ".")} · {d.asset || "—"} {d.direction || ""}</div>
+                <div style={s.histRow}>
+                  <div>
+                    <div style={s.histPnl(p)}>{d.pnl !== "" ? `${p >= 0 ? "+" : ""}${p.toLocaleString()} USDT` : "미기록"}</div>
+                    {pct !== null && (
+                      <div style={{ fontSize: 11, color: p >= 0 ? green : danger, marginTop: 2 }}>
+                        {p >= 0 ? "+" : ""}{pct.toFixed(2)}% (시작금액 대비)
+                      </div>
+                    )}
                   </div>
-                  {d.note && <div style={styles.histNote}>{d.note.slice(0, 80)}{d.note.length > 80 ? "..." : ""}</div>}
+                  <div style={s.histMeta}>위반 {violations}건{d.emotion && <><br />{d.emotion}</>}</div>
                 </div>
-              );
-            })
-          )}
+                {d.note && <div style={s.histNote}>{d.note.slice(0, 80)}{d.note.length > 80 ? "..." : ""}</div>}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Bottom Nav */}
-      <nav style={styles.navBar}>
-        {[
-          ["check", "☑", "루틴"],
-          ["journal", "✎", "일지"],
-          ["history", "◈", "기록"],
-        ].map(([k, icon, label]) => (
-          <button key={k} style={styles.navBtn(tab === k)} onClick={() => setTab(k)}>
+      <nav style={s.navBar}>
+        {[["check", "☑", "루틴"], ["journal", "✎", "일지"], ["history", "◈", "기록"]].map(([k, icon, label]) => (
+          <button key={k} style={s.navBtn(tab === k)} onClick={() => setTab(k)}>
             <span style={{ fontSize: 20 }}>{icon}</span>
             <span>{label}</span>
           </button>
